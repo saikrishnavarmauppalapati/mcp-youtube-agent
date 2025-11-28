@@ -15,8 +15,7 @@ app = FastAPI(title="MCP YouTube Agent")
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow-origin:["https://youtube-mcp-agent-frontend.vercel.app"]
-    allow-credentials: true
+    allow_origins=["https://youtube-mcp-agent-frontend.vercel.app"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
