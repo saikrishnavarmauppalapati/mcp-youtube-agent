@@ -1,134 +1,155 @@
-📺 MCP YouTube Agent – Backend
+# YouTube AI Agent Backend
 
-A lightweight FastAPI backend that provides YouTube automation (search, like, comment, subscribe) and authentication via Google OAuth.
-Designed to work with the YouTube MCP Frontend and your AI Agent.
+This repository contains the backend application for the YouTube AI Agent project. The backend is built using **FastAPI**, **Python**, and **Requests**, and provides APIs for YouTube automation and Google OAuth authentication to be used by the frontend MCP client.
 
-🚀 Features
+---
 
-🔐 Google OAuth login
+## 🚀 Features
 
-🔍 Search YouTube videos
+* 🔐 Google OAuth Login (YouTube Authentication)
+* 🔍 Search YouTube videos
+* 👍 Like videos
+* 💬 Comment on videos
+* 🔔 Subscribe to channels
+* 👤 Fetch authenticated user profile
+* ⚡ Fast and lightweight FastAPI server
+* 🔗 Fully integrated with MCP frontend for AI-powered actions
 
-👍 Like videos
+---
 
-💬 Comment on videos
+## 📂 Project Structure
 
-🔔 Subscribe to channels
-
-👤 Fetch authenticated user profile
-
-⚙️ FastAPI server
-
-🔗 Fully integrated MCP tools
-
-📁 Project Structure
+```
 backend/
 ├── agent.py
 ├── mcp_server.py
 ├── requirements.txt
 └── __pycache__/
+```
 
-🔧 Installation
+---
 
-Clone repo:
+## 🛠️ Tech Stack
 
-git clone <your-backend-repo-url>
+* **Python 3.10+**
+* **FastAPI**
+* **Requests**
+* **Pydantic** (data validation)
+* **YouTube Data API v3**
+* **Google OAuth 2.0**
+* **MCP Client Integration**
+
+---
+
+## 🔧 Setup Instructions
+
+### 1️⃣ Clone the repository
+
+```bash
+git clone <backend_repo_url>
 cd backend
+```
 
+### 2️⃣ Create virtual environment
 
-Create virtual environment:
-
+```bash
 python3 -m venv venv
 source venv/bin/activate
+```
 
+### 3️⃣ Install dependencies
 
-Install dependencies:
-
+```bash
 pip install -r requirements.txt
+```
 
-🔑 Environment Variables
+### 4️⃣ Create `.env` file
 
-Create a .env file:
+```
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+REDIRECT_URI=https://your-frontend.vercel.app/auth/callback
+YOUTUBE_API_KEY=your_youtube_api_key
+```
 
-YOUTUBE_CLIENT_ID=your_google_client_id
-YOUTUBE_CLIENT_SECRET=your_google_client_secret
-YOUTUBE_REDIRECT_URI=https://your-frontend.vercel.app/auth/callback
+### 5️⃣ Run the development server
 
-FRONTEND_URL=https://your-frontend.vercel.app
-BACKEND_URL=https://your-backend.onrender.com
-SECRET_KEY=any-random-string
-
-▶️ Running the Server
-
-Start server:
-
+```bash
 uvicorn mcp_server:app --host 0.0.0.0 --port 8000 --reload
+```
 
+Server runs at: **[http://localhost:8000](http://localhost:8000)**
 
-Server runs at:
+---
 
-http://localhost:8000
+## 🔗 API Endpoints
 
-🌐 API Endpoints
-Authentication
-Method	Endpoint	Description
-GET	/auth/login	Returns Google OAuth login URL
-GET	/auth/callback	OAuth redirect handler
-GET	/auth/me	Get logged-in user info
-POST	/auth/logout	Logout and clear cookies
-YouTube Actions
-Method	Endpoint	Description
-POST	/mcp/youtube/search	Search YouTube
-POST	/mcp/youtube/like/{videoId}	Like a video
-POST	/mcp/youtube/comment	Comment on a video
-POST	/mcp/youtube/subscribe	Subscribe to channel
-🤖 MCP Tools
+### Authentication
 
-Backend exposes these MCP tools:
+| Method | Endpoint         | Description                    |
+| ------ | ---------------- | ------------------------------ |
+| GET    | `/auth/login`    | Returns Google OAuth login URL |
+| GET    | `/auth/callback` | OAuth redirect handler         |
+| GET    | `/auth/me`       | Get logged-in user info        |
+| POST   | `/auth/logout`   | Logout user                    |
 
-search_videos
+### YouTube Actions
 
-like_video
+| Method | Endpoint                      | Description            |
+| ------ | ----------------------------- | ---------------------- |
+| POST   | `/mcp/youtube/search`         | Search YouTube videos  |
+| POST   | `/mcp/youtube/like/{videoId}` | Like a video           |
+| POST   | `/mcp/youtube/comment`        | Comment on a video     |
+| POST   | `/mcp/youtube/subscribe`      | Subscribe to a channel |
 
-comment_video
+---
 
-subscribe_channel
+## 🧪 Testing
 
-get_user_info
+Test the server:
 
-These are consumed by the frontend.
-
-📦 Deployment on Render
-
-Create a Render Web Service.
-
-Build Command:
-
-pip install -r requirements.txt
-
-
-Start Command:
-
-uvicorn mcp_server:app --host 0.0.0.0 --port 10000
-
-
-Add environment variables.
-Deploy.
-
-🧪 Testing
-
-Test server:
-
-curl https://your-backend.onrender.com/
-
+```bash
+curl http://localhost:8000/
+```
 
 Test login URL:
 
-curl https://your-backend.onrender.com/auth/login
+```bash
+curl http://localhost:8000/auth/login
+```
 
+Test search API:
 
-Test search:
-
-curl -X POST https://your-backend.onrender.com/mcp/youtube/search \
+```bash
+curl -X POST http://localhost:8000/mcp/youtube/search \
   -H "Content-Type: application/json" \
   -d '{"query": "chatgpt"}'
+```
+
+---
+
+## 🚀 Deployment
+
+The backend can be deployed on **Render**, **Heroku**, or any Python-compatible cloud service.
+
+**Render example:**
+
+* **Build Command:**
+
+```bash
+pip install -r requirements.txt
+```
+
+* **Start Command:**
+
+```bash
+uvicorn mcp_server:app --host 0.0.0.0 --port 10000
+```
+
+* Set environment variables in Render dashboard.
+
+---
+
+
+
+MIT License
