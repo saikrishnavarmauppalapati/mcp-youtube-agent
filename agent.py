@@ -1,35 +1,13 @@
-import os
-import requests
-from fastapi import APIRouter
-from pydantic import BaseModel
-from openai import OpenAI
-import json
-
-router = APIRouter()
-
-# Render backend URL
-BASE_URL = "https://mcp-youtube-agent-xw94.onrender.com"
-
-# Initialize OpenAI
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# Tool mapping
-TOOL_API = {
-    "search": f"{BASE_URL}/mcp/youtube/search",
-    "like": f"{BASE_URL}/mcp/youtube/like/",
-    "comment": f"{BASE_URL}/mcp/youtube/comment",
-    "subscribe": f"{BASE_URL}/mcp/youtube/subscribe",
-    "liked": f"{BASE_URL}/mcp/youtube/liked",
-    "recommend": f"{BASE_URL}/mcp/youtube/recommend"
-}
-
-# Agent request model
-class AgentRequest(BaseModel):
-    message: str
-
 @router.post("/agent/run")
-async def run_agent(req: AgentRequest):
+async def run_agent(req: AgentRequest, request: Request):
     user_message = req.message
+
+    # Extract user token from frontend
+    token = request.headers.get("Authorization")  # "Bearer <token>"
+    if not token:
+        return {"error": "You must login to perform this action"}
+
+    headers = {"Authorization": token}
 
     system_prompt = """
     You are a YouTube AI assistant.
@@ -56,7 +34,6 @@ async def run_agent(req: AgentRequest):
     tool_name = tool_call.get("tool")
     args = tool_call.get("args", {})
 
-    # If search tool but no args, use user message
     if tool_name == "search" and not args.get("query"):
         args["query"] = user_message
 
@@ -65,14 +42,14 @@ async def run_agent(req: AgentRequest):
 
     try:
         if tool_name in ["search", "comment", "subscribe"]:
-            r = requests.post(TOOL_API[tool_name], json=args)
+            r = requests.post(TOOL_API[tool_name], json=args, headers=headers)
         elif tool_name == "like":
             video_id = args.get("video_id")
             if not video_id:
                 return {"error": "No video_id provided for like"}
-            r = requests.post(f"{TOOL_API['like']}{video_id}")
+            r = requests.post(f"{TOOL_API['like']}{video_id}", headers=headers)
         else:  # liked or recommend
-            r = requests.get(TOOL_API[tool_name])
+            r = requests.get(TOOL_API[tool_name], headers=headers)
         return r.json()
     except Exception as e:
         return {"error": "Failed to call tool API", "details": str(e)}
