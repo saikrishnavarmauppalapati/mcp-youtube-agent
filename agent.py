@@ -1,60 +1,99 @@
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import asyncio
-from mcp import Client
+# agent.py
+import os
 import json
+import requests
+from fastapi import APIRouter, Request
+from pydantic import BaseModel
+from openai import OpenAI
 
-app = FastAPI()
+router = APIRouter()
+BASE_URL = "https://mcp-youtube-agent-xw94.onrender.com"
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# CORS for frontend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-client = Client("youtube-mcp", "http://localhost:3001")
+TOOL_API = {
+    "search": f"{BASE_URL}/mcp/youtube/search",
+    "like": f"{BASE_URL}/mcp/youtube/like/",
+    "comment": f"{BASE_URL}/mcp/youtube/comment",
+    "subscribe": f"{BASE_URL}/mcp/youtube/subscribe",
+    "liked": f"{BASE_URL}/mcp/youtube/liked",
+    "recommend": f"{BASE_URL}/mcp/youtube/recommend"
+}
 
 class AgentRequest(BaseModel):
     message: str
 
+@router.post("/agent/run")
+async def run_agent(req: AgentRequest, request: Request):
+    user_message = req.message
+    incoming_auth = request.headers.get("Authorization")  # Bearer <token>
+    headers = {"Authorization": incoming_auth} if incoming_auth else {}
 
-async def call_mcp_agent(message: str):
+    system_prompt = """
+    You are a YouTube AI assistant. Output STRICTLY a JSON object with this format:
+    {"tool":"<tool_name>", "args": {...}}
+
+    Valid tools: search, like, comment, subscribe, liked, recommend
+    For search -> args: {"query":"..."}
+    For like -> args: {"video_id":"..."}
+    For comment -> args: {"video_id":"...", "text":"..."}
+    For subscribe -> args: {"channel_id":"..."}
+    For liked/recommend -> args: {}
+    Respond ONLY with the JSON object.
     """
-    Sends the user message to the MCP Agent and returns a structured response.
-    """
+
+    # Call OpenAI and get response
+    llm_resp = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ],
+        max_tokens=512,
+    )
+
+    raw = ""
     try:
-        result = await client.query(message)
-
-        # Ensure we always return a dictionary
-        if isinstance(result, str):
-            try:
-                result = json.loads(result)
-            except:
-                return {"status": result}
-
-        if not isinstance(result, dict):
-            return {"status": "Unknown MCP response"}
-
-        # Normalize output fields
-        if "videos" in result:
-            return {"results": result["videos"]}
-
-        if "results" in result:
-            return {"results": result["results"]}
-
-        if "status" in result:
-            return {"status": result["status"]}
-
-        return {"status": "Action completed"}
-
+        raw = llm_resp.choices[0].message.content.strip()
     except Exception as e:
-        print("MCP ERROR:", e)
-        return {"error": str(e)}
+        return {"error": "LLM response missing", "details": str(e)}
 
+    # Try to extract JSON substring
+    try:
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        json_text = raw[start:end]
+        tool_call = json.loads(json_text)
+    except Exception as e:
+        return {"error": "Failed to parse LLM JSON", "raw": raw, "details": str(e)}
 
-@app.post("/agent/run")
-async def run_agent(req: AgentRequest):
-    return await call_mcp_agent(req.message)
+    tool = tool_call.get("tool")
+    args = tool_call.get("args", {}) or {}
+
+    # fallback: if user asked "devops" without tool, treat as search
+    if not tool:
+        tool = "search"
+    if tool == "search" and not args.get("query"):
+        args["query"] = user_message
+
+    if tool not in TOOL_API:
+        return {"error": "Invalid tool selected", "tool": tool}
+
+    # Call the corresponding backend tool and forward Authorization header
+    try:
+        if tool in ["search", "comment", "subscribe"]:
+            r = requests.post(TOOL_API[tool], json=args, headers=headers)
+        elif tool == "like":
+            vid = args.get("video_id")
+            if not vid:
+                return {"error": "like requires video_id"}
+            r = requests.post(TOOL_API["like"] + vid, headers=headers)
+        else:  # liked or recommend
+            r = requests.get(TOOL_API[tool], headers=headers)
+
+        # return parsed json if possible
+        try:
+            return r.json()
+        except Exception:
+            return {"response": r.text}
+    except Exception as e:
+        return {"error": "Tool request failed", "details": str(e)}
