@@ -7,13 +7,9 @@ import json
 
 router = APIRouter()
 
-# Backend base URL
 BASE_URL = "https://mcp-youtube-agent-xw94.onrender.com"
-
-# OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Tool mapping
 TOOL_API = {
     "search": f"{BASE_URL}/mcp/youtube/search",
     "like": f"{BASE_URL}/mcp/youtube/like/",
@@ -23,28 +19,22 @@ TOOL_API = {
     "recommend": f"{BASE_URL}/mcp/youtube/recommend"
 }
 
-# Agent request model
 class AgentRequest(BaseModel):
     message: str
 
 @router.post("/agent/run")
 async def run_agent(req: AgentRequest, request: Request):
     user_message = req.message
-
-    # Extract user token from frontend headers
-    token = request.headers.get("Authorization")  # Expect "Bearer <token>"
+    token = request.headers.get("Authorization")
     if not token:
         return {"error": "Please login to perform this action"}
 
     headers = {"Authorization": token}
 
-    # Prompt for LLM to select tool
     system_prompt = """
     You are a YouTube AI assistant.
     Choose exactly one tool to execute from: search, like, comment, subscribe, liked, recommend.
     Output JSON ONLY: {"tool": "tool_name", "args": {"param": "value"}}
-    If the user asks for recommendations, use 'recommend'.
-    If the user asks for liked videos, use 'liked'.
     """
 
     llm_resp = client.chat.completions.create(
@@ -56,15 +46,16 @@ async def run_agent(req: AgentRequest, request: Request):
     )
 
     try:
-        raw_content = llm_resp.choices[0].message.content
-        tool_call = json.loads(raw_content)
+        raw_content = llm_resp.choices[0].message.content.strip()
+        start = raw_content.find("{")
+        end = raw_content.rfind("}") + 1
+        tool_call = json.loads(raw_content[start:end])
     except Exception as e:
-        return {"error": "Failed to parse LLM response", "details": str(e)}
+        return {"error": "Failed to parse LLM response", "details": str(e), "raw": raw_content}
 
     tool_name = tool_call.get("tool")
     args = tool_call.get("args", {})
 
-    # Ensure search always has query
     if tool_name == "search" and not args.get("query"):
         args["query"] = user_message
 
@@ -86,6 +77,5 @@ async def run_agent(req: AgentRequest, request: Request):
             return r.json()
         except:
             return {"response": r.text}
-
     except Exception as e:
         return {"error": "Failed to call tool API", "details": str(e)}
