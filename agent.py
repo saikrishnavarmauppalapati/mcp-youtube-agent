@@ -1,13 +1,14 @@
 import os
+import json
 import requests
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from openai import OpenAI
-import json
 
 router = APIRouter()
 
 BASE_URL = "https://mcp-youtube-agent-xw94.onrender.com"
+
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 TOOL_API = {
@@ -26,18 +27,43 @@ class AgentRequest(BaseModel):
 async def run_agent(req: AgentRequest, request: Request):
     user_message = req.message
     token = request.headers.get("Authorization")
+
     if not token:
-        return {"error": "Please login to perform this action"}
+        return {"error": "User not authenticated"}
 
     headers = {"Authorization": token}
 
     system_prompt = """
-    You are a YouTube AI assistant.
-    Choose exactly one tool to execute from: search, like, comment, subscribe, liked, recommend.
-    Output JSON ONLY: {"tool": "tool_name", "args": {"param": "value"}}
+    You are a YouTube AI assistant. Always output this EXACT JSON format:
+
+    {
+        "tool": "search",
+        "args": { "query": "devops" }
+    }
+
+    VALID tools:
+    - search
+    - like
+    - comment
+    - subscribe
+    - liked
+    - recommend
+
+    Rules:
+    - For search: args = { "query": "<search keywords>" }
+    - For like: args = { "video_id": "<id>" }
+    - For comment: args = { "video_id": "<id>", "text": "<comment>" }
+    - For subscribe: args = { "channel_id": "<id>" }
+    - For liked: args = {}
+    - For recommend: args = {}
+
+    Output ONLY JSON. No text before or after.
     """
 
-    llm_resp = client.chat.completions.create(
+    # -------------------------------
+    # STEP 1: Ask LLM which tool to use
+    # -------------------------------
+    llm = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[
             {"role": "system", "content": system_prompt},
@@ -45,37 +71,58 @@ async def run_agent(req: AgentRequest, request: Request):
         ]
     )
 
-    try:
-        raw_content = llm_resp.choices[0].message.content.strip()
-        start = raw_content.find("{")
-        end = raw_content.rfind("}") + 1
-        tool_call = json.loads(raw_content[start:end])
-    except Exception as e:
-        return {"error": "Failed to parse LLM response", "details": str(e), "raw": raw_content}
+    raw = llm.choices[0].message.content.strip()
 
-    tool_name = tool_call.get("tool")
+    # Debug return
+    print("\n\n===== RAW LLM OUTPUT =====")
+    print(raw)
+    print("==========================\n\n")
+
+    # Extract only JSON
+    try:
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        cleaned = raw[start:end]
+        tool_call = json.loads(cleaned)
+    except Exception as e:
+        return {
+            "error": "LLM JSON parse failed",
+            "raw_output": raw,
+            "details": str(e)
+        }
+
+    tool = tool_call.get("tool")
     args = tool_call.get("args", {})
 
-    if tool_name == "search" and not args.get("query"):
+    # Fallback for search text
+    if tool == "search" and "query" not in args:
         args["query"] = user_message
 
-    if tool_name not in TOOL_API:
-        return {"error": "Unknown tool"}
+    if tool not in TOOL_API:
+        return {"error": "Invalid tool selected", "tool": tool}
 
+    # -------------------------------
+    # STEP 2: Call the backend tool
+    # -------------------------------
     try:
-        if tool_name in ["search", "comment", "subscribe"]:
-            r = requests.post(TOOL_API[tool_name], json=args, headers=headers)
-        elif tool_name == "like":
-            video_id = args.get("video_id")
-            if not video_id:
-                return {"error": "No video_id provided for like"}
-            r = requests.post(f"{TOOL_API['like']}{video_id}", headers=headers)
-        else:  # liked or recommend
-            r = requests.get(TOOL_API[tool_name], headers=headers)
+        if tool in ["search", "comment", "subscribe"]:
+            r = requests.post(TOOL_API[tool], json=args, headers=headers)
+
+        elif tool == "like":
+            r = requests.post(TOOL_API["like"] + args["video_id"], headers=headers)
+
+        else:
+            r = requests.get(TOOL_API[tool], headers=headers)
+
+        # Debug output
+        print("\n\n===== TOOL RESPONSE =====")
+        print(r.text)
+        print("=========================\n\n")
 
         try:
             return r.json()
         except:
-            return {"response": r.text}
+            return {"error": "Tool returned invalid JSON", "raw": r.text}
+
     except Exception as e:
-        return {"error": "Failed to call tool API", "details": str(e)}
+        return {"error": "Tool request failed", "details": str(e)}
