@@ -25,6 +25,7 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Simple in-memory token store
 USER_TOKENS = {}  # { "access_token": "" }
@@ -223,7 +224,6 @@ async def recommend_videos():
     liked = await liked_videos()
     results = []
     for item in liked.get("results", []):
-        # Use search API with title keywords to recommend similar videos
         query = item["title"]
         url = "https://www.googleapis.com/youtube/v3/search"
         params = {"part": "snippet", "q": query, "type": "video", "maxResults": 3, "key": YOUTUBE_API_KEY}
