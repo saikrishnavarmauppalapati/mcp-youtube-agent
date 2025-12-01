@@ -29,7 +29,6 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 # Simple in-memory token store
 USER_TOKENS = {}  # { "access_token": "" }
 
-
 # ----------------------------
 # MODELS
 # ----------------------------
@@ -43,14 +42,12 @@ class CommentRequest(BaseModel):
 class SubscribeRequest(BaseModel):
     channel_id: str
 
-
 # ----------------------------
 # ROOT
 # ----------------------------
 @app.get("/")
 async def home():
     return {"message": "YouTube MCP Agent Running!"}
-
 
 # ----------------------------
 # OAuth Login URL
@@ -66,18 +63,14 @@ async def auth_login():
         "&access_type=offline"
         "&prompt=consent"
     )
-
     return {"auth_url": auth_url}
-
 
 # ----------------------------
 # OAuth Callback
 # ----------------------------
 @app.get("/auth/callback")
 async def auth_callback(code: str):
-
     token_url = "https://oauth2.googleapis.com/token"
-
     data = {
         "code": code,
         "client_id": GOOGLE_CLIENT_ID,
@@ -85,7 +78,6 @@ async def auth_callback(code: str):
         "redirect_uri": REDIRECT_URI,
         "grant_type": "authorization_code"
     }
-
     r = requests.post(token_url, data=data)
     token_data = r.json()
 
@@ -93,9 +85,7 @@ async def auth_callback(code: str):
         return {"error": "OAuth failed", "details": token_data}
 
     USER_TOKENS["access_token"] = token_data["access_token"]
-
     return {"message": "Login successful", "token": token_data}
-
 
 # ----------------------------
 # USER INFO
@@ -105,14 +95,11 @@ async def auth_me():
     token = USER_TOKENS.get("access_token")
     if not token:
         return JSONResponse({"error": "not_authenticated"}, status_code=401)
-
     r = requests.get(
         "https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
         headers={"Authorization": f"Bearer {token}"}
     )
-
     return r.json()
-
 
 # ----------------------------
 # LOGOUT
@@ -122,13 +109,11 @@ async def logout():
     USER_TOKENS.clear()
     return {"status": "logged_out"}
 
-
 # ----------------------------
 # VIDEO SEARCH
 # ----------------------------
 @app.post("/mcp/youtube/search")
 async def search_videos(req: SearchRequest):
-
     url = "https://www.googleapis.com/youtube/v3/search"
     params = {
         "part": "snippet",
@@ -137,9 +122,12 @@ async def search_videos(req: SearchRequest):
         "maxResults": 10,
         "key": YOUTUBE_API_KEY
     }
-
-    r = requests.get(url, params=params)
-    data = r.json()
+    try:
+        r = requests.get(url, params=params)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        return {"error": "YouTube API request failed", "details": str(e)}
 
     results = []
     for item in data.get("items", []):
@@ -150,83 +138,103 @@ async def search_videos(req: SearchRequest):
             "description": item["snippet"]["description"],
             "thumbnail": item["snippet"]["thumbnails"]["medium"]["url"]
         })
-
     return {"results": results}
-
 
 # ----------------------------
 # LIKE VIDEO
 # ----------------------------
 @app.post("/mcp/youtube/like/{video_id}")
 async def like_video(video_id: str):
-
     token = USER_TOKENS.get("access_token")
     if not token:
         return JSONResponse({"error": "not_authenticated"}, status_code=401)
-
     url = "https://www.googleapis.com/youtube/v3/videos/rate"
     params = {"id": video_id, "rating": "like"}
-
     headers = {"Authorization": f"Bearer {token}"}
-
     r = requests.post(url, params=params, headers=headers)
-
     return {"status": "liked", "response": r.text}
-
 
 # ----------------------------
 # COMMENT VIDEO
 # ----------------------------
 @app.post("/mcp/youtube/comment")
 async def comment_video(req: CommentRequest):
-
     token = USER_TOKENS.get("access_token")
     if not token:
         return JSONResponse({"error": "not_authenticated"}, status_code=401)
-
     url = "https://www.googleapis.com/youtube/v3/commentThreads?part=snippet"
-
     payload = {
         "snippet": {
             "videoId": req.video_id,
-            "topLevelComment": {
-                "snippet": {
-                    "textOriginal": req.text
-                }
-            }
+            "topLevelComment": {"snippet": {"textOriginal": req.text}}
         }
     }
-
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
     r = requests.post(url, json=payload, headers=headers)
-
     return {"status": "commented", "response": r.text}
-
 
 # ----------------------------
 # SUBSCRIBE CHANNEL
 # ----------------------------
 @app.post("/mcp/youtube/subscribe")
 async def subscribe(req: SubscribeRequest):
-
     token = USER_TOKENS.get("access_token")
     if not token:
         return JSONResponse({"error": "not_authenticated"}, status_code=401)
-
     url = "https://www.googleapis.com/youtube/v3/subscriptions?part=snippet"
-
-    payload = {
-        "snippet": {
-            "resourceId": {
-                "kind": "youtube#channel",
-                "channelId": req.channel_id
-            }
-        }
-    }
-
+    payload = {"snippet": {"resourceId": {"kind": "youtube#channel", "channelId": req.channel_id}}}
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
     r = requests.post(url, json=payload, headers=headers)
-
     return {"status": "subscribed", "response": r.text}
+
+# ----------------------------
+# GET LIKED VIDEOS
+# ----------------------------
+@app.get("/mcp/youtube/liked")
+async def liked_videos():
+    token = USER_TOKENS.get("access_token")
+    if not token:
+        return JSONResponse({"error": "not_authenticated"}, status_code=401)
+    url = "https://www.googleapis.com/youtube/v3/videos"
+    params = {"myRating": "like", "part": "snippet", "maxResults": 10}
+    headers = {"Authorization": f"Bearer {token}"}
+    r = requests.get(url, params=params, headers=headers)
+    try:
+        r.raise_for_status()
+        data = r.json()
+    except:
+        return {"error": "Failed to fetch liked videos"}
+    results = []
+    for item in data.get("items", []):
+        results.append({
+            "title": item["snippet"]["title"],
+            "videoId": item["id"],
+            "channelId": item["snippet"]["channelId"],
+            "description": item["snippet"]["description"],
+            "thumbnail": item["snippet"]["thumbnails"]["medium"]["url"]
+        })
+    return {"results": results}
+
+# ----------------------------
+# RECOMMEND VIDEOS BASED ON LIKED VIDEOS
+# ----------------------------
+@app.get("/mcp/youtube/recommend")
+async def recommend_videos():
+    liked = await liked_videos()
+    results = []
+    for item in liked.get("results", []):
+        # Use search API with title keywords to recommend similar videos
+        query = item["title"]
+        url = "https://www.googleapis.com/youtube/v3/search"
+        params = {"part": "snippet", "q": query, "type": "video", "maxResults": 3, "key": YOUTUBE_API_KEY}
+        r = requests.get(url, params=params)
+        data = r.json()
+        for vid in data.get("items", []):
+            results.append({
+                "title": vid["snippet"]["title"],
+                "videoId": vid["id"]["videoId"],
+                "channelId": vid["snippet"]["channelId"],
+                "description": vid["snippet"]["description"],
+                "thumbnail": vid["snippet"]["thumbnails"]["medium"]["url"]
+            })
+    return {"results": results}
