@@ -1,4 +1,3 @@
-# mcp_server.py
 import os
 import requests
 from dotenv import load_dotenv
@@ -6,15 +5,16 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from agent import router as agent_router  # import agent router
 
 load_dotenv()
 app = FastAPI(title="MCP YouTube Agent")
 
-# CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://youtube-mcp-agent-frontend.vercel.app", "http://localhost:3000"],
+    allow_origins=[
+        "https://youtube-mcp-agent-frontend.vercel.app",
+        "http://localhost:3000"
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -24,14 +24,24 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-# in-memory token store
 USER_TOKENS = {}
 
-# ---------------- Auth ----------------
+# --- Models ---
+class SearchRequest(BaseModel):
+    query: str
+
+class CommentRequest(BaseModel):
+    video_id: str
+    text: str
+
+class SubscribeRequest(BaseModel):
+    channel_id: str
+
+# --- Auth Routes ---
 @app.get("/auth/login")
 async def auth_login():
     auth_url = (
-        "https://accounts.google.com/o/oauth2/v2/auth"
+        f"https://accounts.google.com/o/oauth2/v2/auth"
         f"?client_id={GOOGLE_CLIENT_ID}"
         f"&redirect_uri={REDIRECT_URI}"
         "&response_type=code"
@@ -57,24 +67,24 @@ async def auth_callback(code: str):
     if "access_token" not in token_data:
         return {"error": "OAuth failed", "details": token_data}
 
-    # store token
     USER_TOKENS["access_token"] = token_data["access_token"]
     return {"message": "Login successful", "token": token_data}
 
 @app.get("/auth/me")
 async def auth_me(request: Request):
-    auth_header = request.headers.get("Authorization")
-    token = None
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header.split(" ", 1)[1]
-    elif USER_TOKENS.get("access_token"):
+    token = request.headers.get("Authorization")
+    if token and "Bearer" in token:
+        token = token.split(" ", 1)[1]
+    else:
         token = USER_TOKENS.get("access_token")
 
     if not token:
         return JSONResponse({"error": "not_authenticated"}, status_code=401)
 
-    r = requests.get("https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
-                     headers={"Authorization": f"Bearer {token}"})
+    r = requests.get(
+        "https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
+        headers={"Authorization": f"Bearer {token}"}
+    )
     return r.json()
 
 @app.post("/auth/logout")
@@ -82,24 +92,16 @@ async def logout():
     USER_TOKENS.clear()
     return {"status": "logged_out"}
 
-# ---------------- YouTube API ----------------
-class SearchRequest(BaseModel):
-    query: str
-
-class CommentRequest(BaseModel):
-    video_id: str
-    text: str
-
-class SubscribeRequest(BaseModel):
-    channel_id: str
-
+# --- Helper ---
 def _get_auth_header(request: Request):
-    auth = request.headers.get("Authorization")
-    if auth:
-        return {"Authorization": auth}
+    token = request.headers.get("Authorization")
+    if token and "Bearer" in token:
+        return {"Authorization": token}
     if USER_TOKENS.get("access_token"):
         return {"Authorization": f"Bearer {USER_TOKENS['access_token']}"}
     return {}
+
+# --- YouTube Tool Endpoints ---
 
 @app.post("/mcp/youtube/search")
 async def search_videos(req: SearchRequest):
@@ -160,5 +162,52 @@ async def subscribe(req: SubscribeRequest, request: Request):
     r = requests.post(url, json=payload, headers={**headers, "Content-Type": "application/json"})
     return {"status": "subscribed", "response": r.text}
 
-# ---------------- Include agent routes ----------------
+@app.get("/mcp/youtube/liked")
+async def liked_videos(request: Request):
+    headers = _get_auth_header(request)
+    if not headers:
+        return JSONResponse({"error": "not_authenticated"}, status_code=401)
+    url = "https://www.googleapis.com/youtube/v3/videos"
+    params = {"myRating": "like", "part": "snippet", "maxResults": 10}
+    r = requests.get(url, params=params, headers=headers)
+    data = r.json()
+    results = []
+    for item in data.get("items", []):
+        results.append({
+            "title": item["snippet"]["title"],
+            "videoId": item["id"],
+            "channelId": item["snippet"].get("channelId"),
+            "description": item["snippet"].get("description"),
+            "thumbnail": item["snippet"]["thumbnails"]["medium"]["url"] if item["snippet"].get("thumbnails") else ""
+        })
+    return {"results": results}
+
+@app.get("/mcp/youtube/recommend")
+async def recommend_videos(request: Request):
+    headers = _get_auth_header(request)
+    if not headers:
+        return JSONResponse({"error": "not_authenticated"}, status_code=401)
+
+    liked_resp = await liked_videos(request)
+    results = []
+    for item in liked_resp.get("results", []):
+        query = item["title"]
+        url = "https://www.googleapis.com/youtube/v3/search"
+        params = {"part": "snippet", "q": query, "type": "video", "maxResults": 3, "key": YOUTUBE_API_KEY}
+        r = requests.get(url, params=params)
+        data = r.json()
+        for vid in data.get("items", []):
+            video_id = vid["id"].get("videoId") if isinstance(vid["id"], dict) else vid["id"]
+            results.append({
+                "title": vid["snippet"]["title"],
+                "videoId": video_id,
+                "channelId": vid["snippet"].get("channelId"),
+                "description": vid["snippet"].get("description"),
+                "thumbnail": vid["snippet"]["thumbnails"]["medium"]["url"] if vid["snippet"].get("thumbnails") else ""
+            })
+    return {"results": results}
+
+
+# --- Include agent router ---
+from agent import router as agent_router
 app.include_router(agent_router)
