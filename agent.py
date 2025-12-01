@@ -25,7 +25,7 @@ class AgentRequest(BaseModel):
 @router.post("/agent/run")
 async def run_agent(req: AgentRequest, request: Request):
     user_message = req.message
-    incoming_auth = request.headers.get("Authorization")  # Bearer <token>
+    incoming_auth = request.headers.get("Authorization")
     headers = {"Authorization": incoming_auth} if incoming_auth else {}
 
     system_prompt = """
@@ -33,15 +33,9 @@ async def run_agent(req: AgentRequest, request: Request):
     {"tool":"<tool_name>", "args": {...}}
 
     Valid tools: search, like, comment, subscribe, liked, recommend
-    For search -> args: {"query":"..."}
-    For like -> args: {"video_id":"..."}
-    For comment -> args: {"video_id":"...", "text":"..."}
-    For subscribe -> args: {"channel_id":"..."}
-    For liked/recommend -> args: {}
     Respond ONLY with the JSON object.
     """
 
-    # Call OpenAI and get response
     llm_resp = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[
@@ -51,34 +45,23 @@ async def run_agent(req: AgentRequest, request: Request):
         max_tokens=512,
     )
 
-    raw = ""
-    try:
-        raw = llm_resp.choices[0].message.content.strip()
-    except Exception as e:
-        return {"error": "LLM response missing", "details": str(e)}
-
-    # Try to extract JSON substring
+    raw = llm_resp.choices[0].message.content.strip()
     try:
         start = raw.find("{")
         end = raw.rfind("}") + 1
-        json_text = raw[start:end]
-        tool_call = json.loads(json_text)
+        tool_call = json.loads(raw[start:end])
     except Exception as e:
         return {"error": "Failed to parse LLM JSON", "raw": raw, "details": str(e)}
 
-    tool = tool_call.get("tool")
+    tool = tool_call.get("tool") or "search"
     args = tool_call.get("args", {}) or {}
-
-    # fallback: if user asked "devops" without tool, treat as search
-    if not tool:
-        tool = "search"
     if tool == "search" and not args.get("query"):
         args["query"] = user_message
 
     if tool not in TOOL_API:
-        return {"error": "Invalid tool selected", "tool": tool}
+        return {"error": "Invalid tool", "tool": tool}
 
-    # Call the corresponding backend tool and forward Authorization header
+    # call corresponding backend
     try:
         if tool in ["search", "comment", "subscribe"]:
             r = requests.post(TOOL_API[tool], json=args, headers=headers)
@@ -89,11 +72,6 @@ async def run_agent(req: AgentRequest, request: Request):
             r = requests.post(TOOL_API["like"] + vid, headers=headers)
         else:  # liked or recommend
             r = requests.get(TOOL_API[tool], headers=headers)
-
-        # return parsed json if possible
-        try:
-            return r.json()
-        except Exception:
-            return {"response": r.text}
+        return r.json()
     except Exception as e:
         return {"error": "Tool request failed", "details": str(e)}
