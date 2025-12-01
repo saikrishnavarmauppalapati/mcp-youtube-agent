@@ -1,14 +1,44 @@
+import os
+import requests
+from fastapi import APIRouter, Request
+from pydantic import BaseModel
+from openai import OpenAI
+import json
+
+router = APIRouter()
+
+# Backend base URL
+BASE_URL = "https://mcp-youtube-agent-xw94.onrender.com"
+
+# OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Tool mapping
+TOOL_API = {
+    "search": f"{BASE_URL}/mcp/youtube/search",
+    "like": f"{BASE_URL}/mcp/youtube/like/",
+    "comment": f"{BASE_URL}/mcp/youtube/comment",
+    "subscribe": f"{BASE_URL}/mcp/youtube/subscribe",
+    "liked": f"{BASE_URL}/mcp/youtube/liked",
+    "recommend": f"{BASE_URL}/mcp/youtube/recommend"
+}
+
+# Agent request model
+class AgentRequest(BaseModel):
+    message: str
+
 @router.post("/agent/run")
 async def run_agent(req: AgentRequest, request: Request):
     user_message = req.message
 
-    # Extract user token from frontend
-    token = request.headers.get("Authorization")  # "Bearer <token>"
+    # Extract user token from frontend headers
+    token = request.headers.get("Authorization")  # Expect "Bearer <token>"
     if not token:
-        return {"error": "You must login to perform this action"}
+        return {"error": "Please login to perform this action"}
 
     headers = {"Authorization": token}
 
+    # Prompt for LLM to select tool
     system_prompt = """
     You are a YouTube AI assistant.
     Choose exactly one tool to execute from: search, like, comment, subscribe, liked, recommend.
@@ -34,6 +64,7 @@ async def run_agent(req: AgentRequest, request: Request):
     tool_name = tool_call.get("tool")
     args = tool_call.get("args", {})
 
+    # Ensure search always has query
     if tool_name == "search" and not args.get("query"):
         args["query"] = user_message
 
@@ -50,6 +81,11 @@ async def run_agent(req: AgentRequest, request: Request):
             r = requests.post(f"{TOOL_API['like']}{video_id}", headers=headers)
         else:  # liked or recommend
             r = requests.get(TOOL_API[tool_name], headers=headers)
-        return r.json()
+
+        try:
+            return r.json()
+        except:
+            return {"response": r.text}
+
     except Exception as e:
         return {"error": "Failed to call tool API", "details": str(e)}
