@@ -21,7 +21,6 @@ This repository contains the backend application for the YouTube AI Agent projec
 
 ```
 backend/
-├── agent.py
 ├── mcp_server.py
 ├── requirements.txt
 └── __pycache__/
