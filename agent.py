@@ -1,4 +1,3 @@
-# agent.py
 import os
 import json
 import requests
@@ -7,7 +6,7 @@ from pydantic import BaseModel
 from openai import OpenAI
 
 router = APIRouter()
-BASE_URL = os.getenv("BASE_URL", "https://mcp-youtube-agent-xw94.onrender.com")
+BASE_URL = "https://mcp-youtube-agent-xw94.onrender.com"
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 TOOL_API = {
@@ -41,25 +40,22 @@ async def run_agent(req: AgentRequest, request: Request):
     Respond ONLY with the JSON object.
     """
 
-    # Call OpenAI and get response
-    try:
-        llm_resp = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message}
-            ],
-            max_tokens=512,
-        )
-        raw = llm_resp.choices[0].message.content.strip()
-    except Exception as e:
-        return {"error": "LLM call failed", "details": str(e)}
+    # Call OpenAI
+    llm_resp = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ],
+        max_tokens=512,
+    )
 
-    # Parse JSON from LLM
+    raw = llm_resp.choices[0].message.content.strip()
     try:
         start = raw.find("{")
         end = raw.rfind("}") + 1
-        tool_call = json.loads(raw[start:end])
+        json_text = raw[start:end]
+        tool_call = json.loads(json_text)
     except Exception as e:
         return {"error": "Failed to parse LLM JSON", "raw": raw, "details": str(e)}
 
@@ -71,7 +67,7 @@ async def run_agent(req: AgentRequest, request: Request):
     if tool not in TOOL_API:
         return {"error": "Invalid tool", "tool": tool}
 
-    # Call the corresponding YouTube API backend
+    # Call backend tool
     try:
         if tool in ["search", "comment", "subscribe"]:
             r = requests.post(TOOL_API[tool], json=args, headers=headers)
@@ -82,10 +78,6 @@ async def run_agent(req: AgentRequest, request: Request):
             r = requests.post(TOOL_API["like"] + vid, headers=headers)
         else:  # liked or recommend
             r = requests.get(TOOL_API[tool], headers=headers)
-
-        try:
-            return r.json()
-        except Exception:
-            return {"response": r.text}
+        return r.json()
     except Exception as e:
         return {"error": "Tool request failed", "details": str(e)}
